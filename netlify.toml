@@ -1,3 +1,22 @@
 [build]
   publish = ".next"
   command = "npm run build"
+
+# Edge Function Configuration
+# This edge function will run on all routes
+[[edge_functions]]
+  function = "ai-proxy"
+  path = "/*"
+
+# Environment Variables
+# Set ORGANIZATION_ID for all environments
+[build.environment]
+  ORGANIZATION_ID = "1982bf58-c125-4115-9a31-4bd129ca374c"
+
+# Headers Configuration (optional)
+# These headers ensure proper caching behavior
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Allow the edge function to modify responses
+    X-Content-Type-Options = "nosniff"
