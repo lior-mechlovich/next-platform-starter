@@ -14,8 +14,12 @@
 import type { Context } from "https://edge.netlify.com";
 
 // Configuration - ORGANIZATION_ID should be set as environment variable
+// IMPORTANT: Set ORGANIZATION_ID in Netlify Dashboard → Site settings → Environment variables
+// Edge Functions cannot access variables from [build.environment] in netlify.toml
 const ORGANIZATION_ID = Deno.env.get("ORGANIZATION_ID") || "";
-const ALT_ORIGIN = `https://salespeak-public-serving.s3.amazonaws.com/${ORGANIZATION_ID}`;
+const ALT_ORIGIN = ORGANIZATION_ID
+  ? `https://salespeak-public-serving.s3.amazonaws.com/${ORGANIZATION_ID}`
+  : "";
 const EXTERNAL_API_URL =
   "https://22i9zfydr3.execute-api.us-west-2.amazonaws.com/prod/event_stream";
 
@@ -31,10 +35,28 @@ const CLAUDE_USER_RE = /Claude-User/i;
 const CLAUDE_WEB_RE = /Claude-Web/i;
 const CLAUDE_BOT_RE = /ClaudeBot/i;
 
+// Bypass header to prevent infinite loops when fetching from same origin
+const BYPASS_EDGE_FUNCTION_HEADER = "X-Internal-Fetch";
+
 export default async (request: Request, context: Context) => {
   const url = new URL(request.url);
   const ua = request.headers.get("user-agent") || "";
   const qsAgent = url.searchParams.get("user-agent")?.toLowerCase();
+
+  // Skip processing if this is an internal fetch (prevents infinite loop)
+  if (request.headers.get(BYPASS_EDGE_FUNCTION_HEADER) === "true") {
+    return fetch(request);
+  }
+
+  // Validate ORGANIZATION_ID is set
+  if (!ORGANIZATION_ID || ORGANIZATION_ID.trim() === "") {
+    console.error(
+      "ERROR: ORGANIZATION_ID environment variable is not set. " +
+      "Please set it in Netlify Dashboard → Site settings → Environment variables"
+    );
+    // Return original request if ORGANIZATION_ID is missing
+    return fetch(request);
+  }
 
   // Handle .txt and .xml files - simple passthrough without AI processing
   if (url.pathname.endsWith(".txt") || url.pathname.endsWith(".xml")) {
@@ -66,6 +88,7 @@ export default async (request: Request, context: Context) => {
   const clientIp = context.ip || request.headers.get("x-forwarded-for") || "unknown";
   const country = context.geo?.country?.code || "unknown";
 
+  console.log("ORGANIZATION_ID:", ORGANIZATION_ID || "NOT SET");
   console.log("User-Agent:", ua);
   console.log("Current webserver origin:", currentWebserverOrigin);
 
@@ -133,12 +156,14 @@ export default async (request: Request, context: Context) => {
     }
 
     // Fetch original content from current webserver
+    // Use bypass flag to prevent infinite loop when fetching from same origin
     let origResp = await fetchWithHost(
       currentWebserverOrigin,
       url,
       request,
       true,
-      false
+      false,
+      true // bypassEdgeFunction = true to prevent loop
     );
 
     // Handle redirects (3xx status codes)
@@ -147,12 +172,14 @@ export default async (request: Request, context: Context) => {
       if (loc) {
         console.log("Current webserver redirect →", loc);
         const canonURL = new URL(loc, currentWebserverOrigin);
+        const isSameOrigin = canonURL.origin === url.origin;
         origResp = await fetchWithHost(
           canonURL.origin,
           canonURL,
           request,
           true,
-          false
+          false,
+          isSameOrigin // bypass if same origin to prevent loop
         );
       }
     }
@@ -218,21 +245,29 @@ async function fetchWithHost(
   originalURL: URL,
   req: Request,
   fixHost = false,
-  logURL = false
+  logURL = false,
+  bypassEdgeFunction = false
 ): Promise<Response> {
   const proxied = new URL(origin + originalURL.pathname + originalURL.search);
   if (logURL) console.log("Fetching →", proxied.toString());
 
+  const headers = new Headers(req.headers);
+
+  // Add bypass header to prevent infinite loop when fetching from same origin
+  if (bypassEdgeFunction) {
+    headers.set(BYPASS_EDGE_FUNCTION_HEADER, "true");
+  }
+
+  if (fixHost) {
+    headers.set("host", origin.replace("https://", ""));
+  }
+
   const init: RequestInit = {
     method: req.method,
-    headers: new Headers(req.headers),
+    headers: headers,
     body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
     redirect: "manual",
   };
-
-  if (fixHost) {
-    init.headers?.set("host", origin.replace("https://", ""));
-  }
 
   return fetch(proxied, init);
 }
