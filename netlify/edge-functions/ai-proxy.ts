@@ -59,7 +59,7 @@ export default async (request: Request, context: Context) => {
   }
 
   // Handle .txt and .xml files - simple passthrough without AI processing
-  if (url.pathname.endsWith(".txt") || url.pathname.endsWith(".xml")) {
+  if (url.pathname.endsWith(".txt") || url.pathname.endsWith(".xml") || url.pathname.endsWith(".js")) {
     return context.next(); // pass through to origin, no AI processing
   }
 
