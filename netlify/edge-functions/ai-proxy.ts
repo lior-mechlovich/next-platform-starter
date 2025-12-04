@@ -45,7 +45,7 @@ export default async (request: Request, context: Context) => {
 
   // Skip processing if this is an internal fetch (prevents infinite loop)
   if (request.headers.get(BYPASS_EDGE_FUNCTION_HEADER) === "true") {
-    return fetch(request);
+    return context.next();
   }
 
   // Validate ORGANIZATION_ID is set
@@ -54,13 +54,13 @@ export default async (request: Request, context: Context) => {
       "ERROR: ORGANIZATION_ID environment variable is not set. " +
       "Please set it in Netlify Dashboard → Site settings → Environment variables"
     );
-    // Return original request if ORGANIZATION_ID is missing
-    return fetch(request);
+    // Pass through to origin if ORGANIZATION_ID is missing
+    return context.next();
   }
 
   // Handle .txt and .xml files - simple passthrough without AI processing
   if (url.pathname.endsWith(".txt") || url.pathname.endsWith(".xml")) {
-    return fetch(request); // normal cache, no AI processing
+    return context.next(); // pass through to origin, no AI processing
   }
 
   // Detect AI visitors
@@ -136,7 +136,7 @@ export default async (request: Request, context: Context) => {
   /* ─────────── Non-AI visitors: passthrough ─────────── */
   if (!isAIVisitor) {
     console.log("Non-AI → passthrough", url.pathname + url.search);
-    return fetch(request); // normal cache
+    return context.next(); // pass through to origin without re-triggering edge function
   }
 
   /* ─────────── AI visitors: inject #optimized-for-ai from ALT into original ─────────── */
@@ -208,15 +208,9 @@ export default async (request: Request, context: Context) => {
     // This prevents infinite loop since we already have the response
     return finalizeResponse(origResp, true, true);
   } catch (e) {
-    console.error("AI path error; falling back to normal fetch:", e);
-    // On error, fetch with bypass header to prevent loop
-    const headers = new Headers(request.headers);
-    headers.set(BYPASS_EDGE_FUNCTION_HEADER, "true");
-    return fetch(new Request(request.url, {
-      method: request.method,
-      headers: headers,
-      body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
-    }));
+    console.error("AI path error; falling back to pass through:", e);
+    // On error, pass through to origin without re-triggering edge function
+    return context.next();
   }
 };
 
