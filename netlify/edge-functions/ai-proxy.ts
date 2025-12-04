@@ -202,12 +202,21 @@ export default async (request: Request, context: Context) => {
     }
 
     console.log(
-      "AI visitor but no injection/fallback → serving original via fetch(request)"
+      "AI visitor but no injection/fallback → serving original response"
     );
-    return fetch(request);
+    // Return the already-fetched original response instead of fetching again
+    // This prevents infinite loop since we already have the response
+    return finalizeResponse(origResp, true, true);
   } catch (e) {
     console.error("AI path error; falling back to normal fetch:", e);
-    return fetch(request);
+    // On error, fetch with bypass header to prevent loop
+    const headers = new Headers(request.headers);
+    headers.set(BYPASS_EDGE_FUNCTION_HEADER, "true");
+    return fetch(new Request(request.url, {
+      method: request.method,
+      headers: headers,
+      body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
+    }));
   }
 };
 
@@ -254,7 +263,7 @@ async function fetchWithHost(
   const headers = new Headers(req.headers);
 
   // Add bypass header to prevent infinite loop when fetching from same origin
-  if (true || bypassEdgeFunction) {
+  if (bypassEdgeFunction) {
     headers.set(BYPASS_EDGE_FUNCTION_HEADER, "true");
   }
 
