@@ -254,7 +254,7 @@ async function fetchWithHost(
   const headers = new Headers(req.headers);
 
   // Add bypass header to prevent infinite loop when fetching from same origin
-  if (bypassEdgeFunction) {
+  if (true || bypassEdgeFunction) {
     headers.set(BYPASS_EDGE_FUNCTION_HEADER, "true");
   }
 
